@@ -1,12 +1,17 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, session, jsonify
 import sqlite3
 
 app = Flask(__name__)
+
+# Used for the local lab session.
+app.secret_key = "lab-secret-key-change-this"
+
 
 def get_db():
     conn = sqlite3.connect("lab.db")
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_db():
     conn = get_db()
@@ -27,12 +32,17 @@ def init_db():
 
     for user in users:
         conn.execute(
-            "INSERT OR IGNORE INTO users (id, username, password) VALUES (?, ?, ?)",
+            """
+            INSERT OR IGNORE INTO users
+            (id, username, password)
+            VALUES (?, ?, ?)
+            """,
             user
         )
 
     conn.commit()
     conn.close()
+
 
 
 @app.route("/")
@@ -54,38 +64,48 @@ def home():
     </form>
 
     <h2>User Profile</h2>
-    <a href="/profile?id=1">Profile 1</a><br>
-    <a href="/profile?id=2">Profile 2</a><br>
-    <a href="/profile?id=3">Profile 3</a>
+    <a href="/profile">My Profile</a>
     """
 
 
-# INTENTIONALLY VULNERABLE TO SQL INJECTION
+
 @app.route("/login", methods=["POST"])
 def login():
+
     username = request.form.get("username", "")
     password = request.form.get("password", "")
 
     conn = get_db()
 
-    query = f"""
+    result = conn.execute(
+        """
         SELECT * FROM users
         WHERE username = ?
         AND password = ?
-    """
+        """,
+        (username, password)
+    ).fetchone()
 
-    result = conn.execute(query,(username, password)).fetchone()
     conn.close()
 
     if result:
-        return f"<h2>Login successful</h2><p>Welcome {result['username']}</p>"
+
+        # Store authenticated user's ID in the server-side session.
+        session["user_id"] = result["id"]
+
+        return f"""
+        <h2>Login successful</h2>
+        <p>Welcome {result['username']}</p>
+        <a href="/profile">View Profile</a>
+        """
 
     return "<h2>Login failed</h2>"
 
 
-# INTENTIONALLY VULNERABLE TO XSS
+
 @app.route("/search")
 def search():
+
     q = request.args.get("q", "")
 
     return render_template_string("""
@@ -94,16 +114,28 @@ def search():
     """, q=q)
 
 
-# INTENTIONALLY VULNERABLE TO BROKEN ACCESS CONTROL
+
 @app.route("/profile")
 def profile():
-    user_id = request.args.get("id", "")
+
+    # Get identity from authenticated session,
+    # not from a user-controlled URL parameter.
+    user_id = session.get("user_id")
+
+    if not user_id:
+        return "Unauthorized", 401
 
     conn = get_db()
+
     user = conn.execute(
-        "SELECT id, username FROM users WHERE id = ?",
+        """
+        SELECT id, username
+        FROM users
+        WHERE id = ?
+        """,
         (user_id,)
     ).fetchone()
+
     conn.close()
 
     if not user:
@@ -116,6 +148,60 @@ def profile():
     """
 
 
+
+@app.route("/api/profile", methods=["GET"])
+def api_profile():
+
+    user_id = session.get("user_id")
+
+    if not user_id:
+        return jsonify({
+            "error": "Unauthorized"
+        }), 401
+
+    conn = get_db()
+
+    user = conn.execute(
+        """
+        SELECT id, username
+        FROM users
+        WHERE id = ?
+        """,
+        (user_id,)
+    ).fetchone()
+
+    conn.close()
+
+    if not user:
+        return jsonify({
+            "error": "User not found"
+        }), 404
+
+    return jsonify({
+        "id": user["id"],
+        "username": user["username"]
+    })
+
+
+
+@app.route("/logout")
+def logout():
+
+    session.clear()
+
+    return """
+    <h2>Logged out</h2>
+    <a href="/">Return to Home</a>
+    """
+
+
+
 if __name__ == "__main__":
+
     init_db()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=False
+    )
