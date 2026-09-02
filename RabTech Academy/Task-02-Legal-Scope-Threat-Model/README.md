@@ -1,3 +1,7 @@
+## Task 02 Report
+
+📄 [Open / Download Task 02 Report](./Task-02-Legal-Scope-Threat-Model.pdf)
+
 # Task 02 — Legal Scope, Asset Inventory & Threat Model
 
 ## Overview
